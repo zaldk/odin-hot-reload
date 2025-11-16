@@ -17,11 +17,12 @@ when ODIN_OS == .Windows {
 }
 
 Symbols :: struct {
-    draw_background: proc(),
+    get_background: proc() -> rl.Color,
     __handle: dynlib.Library,
 }
 
-main :: proc() {
+main :: proc() { RUNME() }
+RUNME :: proc() {
     ctx: api.API
     ctx.dll_path = "./.build/lib"+DLL_EXT
 
@@ -36,8 +37,7 @@ main :: proc() {
 
     for !rl.WindowShouldClose() {
         rl.BeginDrawing()
-        rl.ClearBackground(rl.BLACK)
-        lib.draw_background()
+        rl.ClearBackground(lib.get_background())
         rl.DrawText(strings.unsafe_string_to_cstring(fmt.tprintf("%v",ctx.last_dll_change_time)), 0,0, 60, rl.WHITE)
         rl.EndDrawing()
 

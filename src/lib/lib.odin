@@ -2,6 +2,6 @@ package library
 
 import rl "vendor:raylib"
 
-@export draw_background :: proc() {
-    rl.ClearBackground({100,0,0,255})
+@export get_background :: proc() -> rl.Color {
+    return { 100, 10, 20, 255 }
 }
