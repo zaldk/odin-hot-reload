@@ -1,0 +1,14 @@
+{
+    "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
+    "collections": [{ "name": "src", "path": "./src" }, { "name": "build", "path": "./build" }],
+    "enable_checker_only_saved": false,
+    "enable_semantic_tokens": true,
+    "enable_document_symbols" : true,
+    "enable_format": false,
+    "enable_hover": true,
+    "enable_references": true,
+    "enable_rename": true,
+    "enable_inlay_hints": true,
+    "profile": "default",
+    "profiles": [{ "name": "default", "checker_path": ["src", "build"] }]
+}
