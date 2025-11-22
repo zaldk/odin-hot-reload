@@ -1,4 +1,4 @@
-package main_release
+package engine_release
 
 import "core:log"
 import "core:os"
@@ -17,6 +17,12 @@ main :: proc() {
     exe_dir := filepath.dir(exe_path, context.temp_allocator)
     os.set_current_directory(exe_dir)
 
+    when USE_TRACKING_ALLOCATOR {
+        tracking_allocator: mem.Tracking_Allocator
+        mem.tracking_allocator_init(&tracking_allocator, context.allocator)
+        context.allocator = mem.tracking_allocator(&tracking_allocator)
+    }
+
     mode: int = 0
     when ODIN_OS == .Linux {
         mode = os.S_IRUSR | os.S_IWUSR | os.S_IRGRP | os.S_IROTH
@@ -32,12 +38,6 @@ main :: proc() {
     logger := logfile_err == os.ERROR_NONE ? log.create_file_logger(logfile) : log.create_console_logger()
     context.logger = logger
 
-    when USE_TRACKING_ALLOCATOR {
-        tracking_allocator: mem.Tracking_Allocator
-        mem.tracking_allocator_init(&tracking_allocator, context.allocator)
-        context.allocator = mem.tracking_allocator(&tracking_allocator)
-    }
-
     app.app_open()
     app.app_init()
     for app.app_should_run() { app.app_update() }
@@ -46,10 +46,10 @@ main :: proc() {
 
     when USE_TRACKING_ALLOCATOR {
         for _, value in tracking_allocator.allocation_map {
-            log.errorf("%v: Leaked %v bytes\n", value.location, value.size)
+            log.errorf("{}: Leaked {} bytes\n", value.location, value.size)
         }
         for value in tracking_allocator.bad_free_array {
-            fmt.printf("[%v] %v double free detected\n", value.memory, value.location)
+            fmt.printf("[{}] {} double free detected\n", value.memory, value.location)
         }
         mem.tracking_allocator_destroy(&tracking_allocator)
     }

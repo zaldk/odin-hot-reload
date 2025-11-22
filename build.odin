@@ -2,18 +2,20 @@ package build
 
 import "core:c/libc"
 import "core:log"
+import os "core:os/os2"
 import "core:fmt"
-import "core:os"
-import "core:os/os2"
 import "core:strings"
 
 Command :: [dynamic]string
 cmd: Command
 
-NAME :: "FLOAT"
-SRC_DIR :: "src/"
-BUILD_DIR :: ".build/"
+NAME        :: "FLOAT"
+SRC_DIR     :: "src/"
+BUILD_DIR   :: ".build/"
 IGNORE_PATH :: BUILD_DIR + "/.gitignore"
+DLL_DIR     :: BUILD_DIR + "dlls/"
+EXE_NAME    :: "app"
+DLL_NAME    :: "app_dll"
 when ODIN_OS == .Windows {
     DLL_EXT :: ".dll"
     EXE_EXT :: ".exe"
@@ -25,7 +27,7 @@ when ODIN_OS == .Windows {
 main :: proc() {
     context.allocator = context.temp_allocator;
     defer free_all(context.temp_allocator)
-    context.logger = log.create_console_logger(.Info, {.Level, .Terminal_Color})
+    context.logger = log.create_console_logger(opt={.Level, .Time, .Short_File_Path, .Line, .Terminal_Color})
     defer log.destroy_console_logger(context.logger)
     cmd = make([dynamic]string)
 
@@ -33,20 +35,23 @@ main :: proc() {
     assert(exec(&cmd))
 
     assert(setup_build_dir())
-    exe_name : string
-
+    exe_suffix: string
     if len(os.args) > 1 {
         switch os.args[1] {
         case "release":
-            exe_name = "app_release"
-            append(&cmd, "odin build "+SRC_DIR+"main_release", "-o:speed")
-            append(&cmd, fmt.tprintf("-out:"+BUILD_DIR+"%v"+EXE_EXT, exe_name))
+            exe_suffix = "_release"
+            append(&cmd, "odin", "build", SRC_DIR+"engine_release", "-o:speed", "-show-timings")
+            append(&cmd, fmt.tprintf("-out:{}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case "dev":
-            append(&cmd, "echo TODO")
+            compile_dll(#file, #line)
+
+            exe_suffix = "_dev"
+            append(&cmd, "odin", "build", SRC_DIR+"engine_hot_reload", "-debug")
+            append(&cmd, fmt.tprintf("-out:{}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case:
-            log.errorf("Unsupported build type: %v", os.args[1])
+            log.errorf("Unsupported build type: {}", os.args[1])
             return
         }
     } else {
@@ -57,42 +62,72 @@ main :: proc() {
     if len(os.args) > 2 {
         switch os.args[2] {
         case "", "run":
-            append(&cmd, fmt.tprintf(BUILD_DIR+"%v", exe_name))
+            append(&cmd, fmt.tprintf("{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix))
             assert(exec(&cmd))
         case:
-            log.errorf("Expected `` or `run`, got: %v", os.args[2])
+            log.errorf("Expected `` or `run`, got: {}", os.args[2])
             return
         }
     }
 }
 
+compile_dll :: proc(file: string, line: int) {
+    log.debugf("called compile_dll from {}:{}", file, line)
+
+    append(&cmd, "odin", "build", SRC_DIR, "-debug")
+    append(&cmd, "-define:RAYLIB_SHARED=true", "-build-mode:dll")
+    when ODIN_OS == .Linux {
+        append(&cmd, "-extra-linker-flags:'-Wl,-rpath=./thirdparty/'")
+    }
+    append(&cmd, fmt.tprintf("-out:{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
+    assert(exec(&cmd, silent=true))
+
+    append(&cmd, "mv")
+    append(&cmd, fmt.tprintf("{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
+    append(&cmd, fmt.tprintf("{}{}{}", DLL_DIR, DLL_NAME, DLL_EXT))
+    assert(exec(&cmd, silent=true))
+}
+
 print_usage :: proc() {
-    log.infof("Usage:\n    odin run . -- $type [?run]\n        $type in: `release`, `dev`\n        [run] - optional `run` to auto run the exe")
+    log.infof("Usage:\n    odin run . -- $type [run]\n        $type in: `release`, `dev`\n        [run] - optional `run` to auto run the exe")
 }
 
 setup_build_dir :: proc() -> bool {
-    if !os2.exists(BUILD_DIR) {
-        log.infof("Creating build directory: %v", BUILD_DIR)
-        if err := os2.make_directory(BUILD_DIR, 0o755); err != nil {
-            log.errorf("Failed to create %v: %v", BUILD_DIR, err)
+    if !os.exists(BUILD_DIR) {
+        log.infof("Creating build directory: {}", BUILD_DIR)
+        if err := os.make_directory(BUILD_DIR, 0o755); err != nil {
+            log.errorf("Failed to create {}: {}", BUILD_DIR, err)
             return false
         }
     } else {
-        if !os2.is_directory(BUILD_DIR) {
-            log.errorf("%v is not a directory.", BUILD_DIR)
+        if !os.is_directory(BUILD_DIR) {
+            log.errorf("{} is not a directory.", BUILD_DIR)
             return false
         }
     }
 
-    if !os2.exists(IGNORE_PATH) {
-        log.info("Creating .gitignore: %v", IGNORE_PATH)
-        if err := os2.write_entire_file_from_string(IGNORE_PATH, "*"); err != nil {
-            log.errorf("Failed to create %v: %v", IGNORE_PATH, err)
+    if !os.exists(IGNORE_PATH) {
+        log.info("Creating .gitignore: {}", IGNORE_PATH)
+        if err := os.write_entire_file_from_string(IGNORE_PATH, "*"); err != nil {
+            log.errorf("Failed to create {}: {}", IGNORE_PATH, err)
             return false
         }
     } else {
-        if !os2.is_file(IGNORE_PATH) {
-            log.errorf("%v is not a regular file.", IGNORE_PATH)
+        if !os.is_file(IGNORE_PATH) {
+            log.errorf("{} is not a regular file.", IGNORE_PATH)
+            return false
+        }
+    }
+
+    if !os.exists(DLL_DIR) {
+        log.infof("Creating dlls directory: {}", DLL_DIR)
+        if err := os.make_directory(DLL_DIR, 0o755); err != nil {
+            log.errorf("Failed to create {}: {}", DLL_DIR, err)
+            return false
+        }
+    } else {
+        if !os.is_directory(DLL_DIR) {
+            log.errorf("{} is not a directory.", DLL_DIR)
             return false
         }
     }
@@ -100,12 +135,12 @@ setup_build_dir :: proc() -> bool {
     return true
 }
 
-exec :: proc(command: ^Command) -> bool {
+exec :: proc(command: ^Command, silent := false) -> bool {
     defer clear(command)
     cmd := strings.join(command[:], " "); defer delete(cmd)
     cstr := strings.clone_to_cstring(cmd); defer delete(cstr)
 
-    log.infof("Executing: %s", cmd)
+    if !silent do log.infof("Executing: %s", cmd)
     res := libc.system(cstr)
 
     when ODIN_OS == .Windows {
