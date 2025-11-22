@@ -70,7 +70,6 @@ gather_modification_data :: proc(md: ^AppModificationData) {
                 md.has_updated = true
                 return
             }
-            log.debugf("{}: {}\t{}", fi.fullpath, cached_lmd._nsec, lmd._nsec)
         }
     }
     // }}}

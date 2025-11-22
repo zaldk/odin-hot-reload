@@ -44,7 +44,7 @@ main :: proc() {
             append(&cmd, fmt.tprintf("-out:{}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case "dev":
-            compile_dll(#file, #line)
+            compile_dll(#file, #line, false)
 
             exe_suffix = "_dev"
             append(&cmd, "odin", "build", SRC_DIR+"engine_hot_reload", "-debug")
@@ -52,6 +52,7 @@ main :: proc() {
             assert(exec(&cmd))
         case:
             log.errorf("Unsupported build type: {}", os.args[1])
+            print_usage()
             return
         }
     } else {
@@ -61,35 +62,41 @@ main :: proc() {
 
     if len(os.args) > 2 {
         switch os.args[2] {
-        case "", "run":
+        case "--run":
             append(&cmd, fmt.tprintf("{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix))
             assert(exec(&cmd))
         case:
-            log.errorf("Expected `` or `run`, got: {}", os.args[2])
+            log.errorf("Unexpected option: {}", os.args[2])
+            print_usage()
             return
         }
     }
 }
 
-compile_dll :: proc(file: string, line: int) {
+compile_dll :: proc(file: string, line: int, silent := true) {
     log.debugf("called compile_dll from {}:{}", file, line)
 
     append(&cmd, "odin", "build", SRC_DIR, "-debug")
     append(&cmd, "-define:RAYLIB_SHARED=true", "-build-mode:dll")
     when ODIN_OS == .Linux {
-        append(&cmd, "-extra-linker-flags:'-Wl,-rpath=./thirdparty/'")
+        append(&cmd, "-extra-linker-flags:'-Wl,-rpath="+ODIN_ROOT+"vendor/raylib/linux'")
     }
     append(&cmd, fmt.tprintf("-out:{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
-    assert(exec(&cmd, silent=true))
+    assert(exec(&cmd, silent))
 
     append(&cmd, "mv")
     append(&cmd, fmt.tprintf("{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
     append(&cmd, fmt.tprintf("{}{}{}", DLL_DIR, DLL_NAME, DLL_EXT))
-    assert(exec(&cmd, silent=true))
+    assert(exec(&cmd, silent))
 }
 
 print_usage :: proc() {
-    log.infof("Usage:\n    odin run . -- $type [run]\n        $type in: `release`, `dev`\n        [run] - optional `run` to auto run the exe")
+    fmt.printf(
+`Usage: odin run . -- [TYPE] [OPTIONS]
+Arguments:
+    [TYPE]      the type of executable: [required] (release/dev)
+Options:
+    --run       run the executable upon build. [optional]`)
 }
 
 setup_build_dir :: proc() -> bool {
@@ -140,7 +147,7 @@ exec :: proc(command: ^Command, silent := false) -> bool {
     cmd := strings.join(command[:], " "); defer delete(cmd)
     cstr := strings.clone_to_cstring(cmd); defer delete(cstr)
 
-    if !silent do log.infof("Executing: %s", cmd)
+    if !silent do log.debugf("Executing: %s", cmd)
     res := libc.system(cstr)
 
     when ODIN_OS == .Windows {

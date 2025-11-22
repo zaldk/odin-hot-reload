@@ -22,7 +22,7 @@ draw :: proc() {
     rl.BeginDrawing()
     rl.ClearBackground({20,20,20,255})
     rl.DrawFPS(0,0)
-    rl.DrawText(fmt.ctprintf("some_number: {}", M.some_number), 80, 120, 60, {100,100,200,255})
+    rl.DrawText(fmt.ctprintf("some_number: {}", M.some_number), 80, 120, 60, {200,200,200,255})
     rl.EndDrawing()
 }
 
