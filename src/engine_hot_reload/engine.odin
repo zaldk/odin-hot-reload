@@ -8,9 +8,9 @@ import "core:strings"
 import "core:time"
 import build "../.."
 import os "core:os/os2"
+import win "core:sys/windows"
 
-APP_DLL_DIR :: build.BUILD_DIR+"dlls/"
-APP_DLL_PATH :: APP_DLL_DIR + build.DLL_NAME + build.DLL_EXT
+APP_DLL_PATH :: build.BUILD_DIR + build.DLL_NAME + build.DLL_EXT
 
 AppAPI :: struct {
     lib: dynlib.Library,
@@ -76,7 +76,7 @@ gather_modification_data :: proc(md: ^AppModificationData) {
 }
 
 get_app_dll_name :: proc(api_version: int) -> string {
-    return fmt.tprintf("{}{}_{}{}", APP_DLL_DIR, build.DLL_NAME, api_version, build.DLL_EXT)
+    return fmt.tprintf("{}{}_{}{}", build.BUILD_DIR, build.DLL_NAME, api_version, build.DLL_EXT)
 }
 
 // We copy the DLL because using it directly would lock it, which would prevent the compiler from writing to it.
@@ -103,12 +103,21 @@ load_app_api :: proc(api_version: int) -> (api: AppAPI, ok: bool) {
     app_dll_name := get_app_dll_name(api_version)
     copy_dll(app_dll_name) or_return
 
+    log.debugf("app_dll_name = %q", app_dll_name)
+    // when ODIN_OS == .Windows {
+    //     wide_path := win.utf8_to_wstring(APP_DLL_DIR)
+    //     log.debugf("wide_path = %q", wide_path)
+    //     // defer free(rawptr(wide_path))
+    //     win.SetDllDirectoryW(wide_path)
+    // }
+
     // This proc matches the names of the fields in App_API to sols in the
     // game DLL. It actually looks for symbols starting with `app_`, which is
     // why the argument `"app_"` is there.
     _, ok = dynlib.initialize_symbols(&api, app_dll_name, "app_", "lib")
     if !ok {
         log.errorf("Failed initializing symbols: {}", dynlib.last_error())
+        return
     }
 
     api.version = api_version

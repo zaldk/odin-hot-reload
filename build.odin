@@ -9,13 +9,12 @@ import "core:strings"
 Command :: [dynamic]string
 cmd: Command
 
-NAME        :: "FLOAT"
 SRC_DIR     :: "src/"
 BUILD_DIR   :: ".build/"
-IGNORE_PATH :: BUILD_DIR + "/.gitignore"
-DLL_DIR     :: BUILD_DIR + "dlls/"
+IGNORE_PATH :: BUILD_DIR + ".gitignore"
 EXE_NAME    :: "app"
 DLL_NAME    :: "app_dll"
+
 when ODIN_OS == .Windows {
     DLL_EXT :: ".dll"
     EXE_EXT :: ".exe"
@@ -31,7 +30,11 @@ main :: proc() {
     defer log.destroy_console_logger(context.logger)
     cmd = make([dynamic]string)
 
-    append(&cmd, "clear")
+    when ODIN_OS == .Windows {
+        append(&cmd, "cls")
+    } else {
+        append(&cmd, "clear")
+    }
     assert(exec(&cmd))
 
     assert(setup_build_dir())
@@ -62,8 +65,8 @@ main :: proc() {
 
     if len(os.args) > 2 {
         switch os.args[2] {
-        case "--run":
-            append(&cmd, fmt.tprintf("{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix))
+        case "-r":
+            append(&cmd, fmt.tprintf("start /B /WAIT {}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case:
             log.errorf("Unexpected option: {}", os.args[2])
@@ -73,6 +76,15 @@ main :: proc() {
     }
 }
 
+print_usage :: proc() {
+    fmt.printf(
+`Usage: odin run . -- [TYPE] [OPTIONS]
+Arguments:
+    [TYPE]      the type of executable: [required] (release/dev)
+Options:
+    -r          run the executable upon build. [optional]`)
+}
+
 compile_dll :: proc(file: string, line: int, silent := true) {
     log.debugf("called compile_dll from {}:{}", file, line)
 
@@ -80,23 +92,22 @@ compile_dll :: proc(file: string, line: int, silent := true) {
     append(&cmd, "-define:RAYLIB_SHARED=true", "-build-mode:dll")
     when ODIN_OS == .Linux {
         append(&cmd, "-extra-linker-flags:'-Wl,-rpath="+ODIN_ROOT+"vendor/raylib/linux'")
+    } else {
+        rl_dst_path :: BUILD_DIR+"raylib.dll"
+        if !os.exists(rl_dst_path) {
+            rl_src_path :: ODIN_ROOT+"vendor/raylib/windows/raylib.dll"
+            if os.exists(rl_src_path) {
+                os.copy_file(rl_dst_path, rl_src_path)
+            } else {
+                log.errorf("Could not find odin's raylib.dll, please copy raylib.dll into the {} folder.", BUILD_DIR)
+            }
+        }
     }
-    append(&cmd, fmt.tprintf("-out:{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
+    append(&cmd, "-out:"+BUILD_DIR+DLL_NAME+DLL_EXT)
+    when ODIN_OS == .Windows {
+        append(&cmd, ">", "NUL", "2>&1")
+    }
     assert(exec(&cmd, silent))
-
-    append(&cmd, "mv")
-    append(&cmd, fmt.tprintf("{}{}_tmp{}", DLL_DIR, DLL_NAME, DLL_EXT))
-    append(&cmd, fmt.tprintf("{}{}{}", DLL_DIR, DLL_NAME, DLL_EXT))
-    assert(exec(&cmd, silent))
-}
-
-print_usage :: proc() {
-    fmt.printf(
-`Usage: odin run . -- [TYPE] [OPTIONS]
-Arguments:
-    [TYPE]      the type of executable: [required] (release/dev)
-Options:
-    --run       run the executable upon build. [optional]`)
 }
 
 setup_build_dir :: proc() -> bool {
@@ -122,19 +133,6 @@ setup_build_dir :: proc() -> bool {
     } else {
         if !os.is_file(IGNORE_PATH) {
             log.errorf("{} is not a regular file.", IGNORE_PATH)
-            return false
-        }
-    }
-
-    if !os.exists(DLL_DIR) {
-        log.infof("Creating dlls directory: {}", DLL_DIR)
-        if err := os.make_directory(DLL_DIR, 0o755); err != nil {
-            log.errorf("Failed to create {}: {}", DLL_DIR, err)
-            return false
-        }
-    } else {
-        if !os.is_directory(DLL_DIR) {
-            log.errorf("{} is not a directory.", DLL_DIR)
             return false
         }
     }
