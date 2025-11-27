@@ -120,10 +120,18 @@ compile_dll_proc :: proc(_data: rawptr) {
             }
         }
     }
-    append(&cmd, "-out:"+BUILD_DIR+DLL_NAME+DLL_EXT)
+    append(&cmd, "-out:"+BUILD_DIR+DLL_NAME+DLL_EXT+"_TMP")
     when ODIN_OS == .Windows {
         append(&cmd, ">", "NUL", "2>&1")
     }
+    assert(exec(&cmd, silent=data.silent))
+
+    when ODIN_OS == .Windows {
+        append(&cmd, "move")
+    } else {
+        append(&cmd, "mv")
+    }
+    append(&cmd, BUILD_DIR+DLL_NAME+DLL_EXT+"_TMP", BUILD_DIR+DLL_NAME+DLL_EXT)
     assert(exec(&cmd, silent=data.silent))
 }
 

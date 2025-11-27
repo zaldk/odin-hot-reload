@@ -12,7 +12,7 @@ AppMemory :: struct {
 }
 
 update :: proc() {
-    M.some_number += 1
+    M.some_number += 1000
     if rl.IsKeyPressed(.ESCAPE) {
         M.run = false
     }
