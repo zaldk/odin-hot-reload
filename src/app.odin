@@ -22,14 +22,14 @@ draw :: proc() {
     rl.BeginDrawing()
     rl.ClearBackground({20,20,20,255})
     rl.DrawFPS(0,0)
-    rl.DrawText(fmt.ctprintf("some_number: {}\nAND TEXT", M.some_number), 80, 120, 60, {200,200,200,255})
+    rl.DrawText(fmt.ctprintf("some_number: {}", M.some_number), 80, 120, 60, {200,200,200,255})
     rl.EndDrawing()
 }
 
 @(export) app_open :: proc() {
     rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
     rl.InitWindow(800, 600, "FLOAT")
-    rl.SetTargetFPS(min(60, rl.GetMonitorRefreshRate(rl.GetCurrentMonitor())))
+    rl.SetTargetFPS(rl.GetMonitorRefreshRate(rl.GetCurrentMonitor()))
     rl.SetExitKey(nil)
 }
 

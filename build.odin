@@ -1,13 +1,18 @@
 package build
 
 import "core:c/libc"
-import "core:log"
-import os "core:os/os2"
 import "core:fmt"
+import "core:log"
 import "core:strings"
+import os "core:os/os2"
+
+import "base:runtime"
+import "core:thread"
+import "core:sys/posix"
+import "core:sys/windows"
 
 Command :: [dynamic]string
-cmd: Command
+@(thread_local) cmd: Command
 
 SRC_DIR     :: "src/"
 BUILD_DIR   :: ".build/"
@@ -47,7 +52,7 @@ main :: proc() {
             append(&cmd, fmt.tprintf("-out:{}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case "dev":
-            compile_dll(#file, #line, false)
+            compile_dll(silent=false)
 
             exe_suffix = "_dev"
             append(&cmd, "odin", "build", SRC_DIR+"engine_hot_reload", "-debug")
@@ -66,7 +71,10 @@ main :: proc() {
     if len(os.args) > 2 {
         switch os.args[2] {
         case "-r":
-            append(&cmd, fmt.tprintf("start /B /WAIT {}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
+            when ODIN_OS == .Windows {
+                append(&cmd, fmt.tprintf("start", "/B", "/WAIT"))
+            }
+            append(&cmd, fmt.tprintf("{}{}{}{}", BUILD_DIR, EXE_NAME, exe_suffix, EXE_EXT))
             assert(exec(&cmd))
         case:
             log.errorf("Unexpected option: {}", os.args[2])
@@ -85,8 +93,17 @@ Options:
     -r          run the executable upon build. [optional]`)
 }
 
-compile_dll :: proc(file: string, line: int, silent := true) {
-    log.debugf("called compile_dll from {}:{}", file, line)
+CompileDLLData :: struct {
+    silent: bool,
+    loc: runtime.Source_Code_Location,
+}
+compile_dll :: proc(silent := false, loc := #caller_location) {
+    data := CompileDLLData{ silent, loc }
+    t := thread.create_and_start_with_data(&data, compile_dll_proc, self_cleanup=true)
+}
+compile_dll_proc :: proc(_data: rawptr) {
+    data := cast(^CompileDLLData)_data
+    log.debugf("called compile_dll from {}:{}:{}", data.loc.file_path, data.loc.line, data.loc.column)
 
     append(&cmd, "odin", "build", SRC_DIR, "-debug")
     append(&cmd, "-define:RAYLIB_SHARED=true", "-build-mode:dll")
@@ -107,7 +124,7 @@ compile_dll :: proc(file: string, line: int, silent := true) {
     when ODIN_OS == .Windows {
         append(&cmd, ">", "NUL", "2>&1")
     }
-    assert(exec(&cmd, silent))
+    assert(exec(&cmd, silent=data.silent))
 }
 
 setup_build_dir :: proc() -> bool {
@@ -140,14 +157,20 @@ setup_build_dir :: proc() -> bool {
     return true
 }
 
-exec :: proc(command: ^Command, silent := false) -> bool {
+exec :: proc(command: ^Command, silent := false, loc := #caller_location) -> bool {
     defer clear(command)
-    cmd := strings.join(command[:], " "); defer delete(cmd)
-    cstr := strings.clone_to_cstring(cmd); defer delete(cstr)
 
-    if !silent do log.debugf("Executing: %s", cmd)
+    cmd := strings.join(command[:], " ")
+    defer delete(cmd)
+    cstr := strings.clone_to_cstring(cmd)
+    defer delete(cstr)
+
+    if !silent {
+        log.debugf("{}:{}: Executing: %q", loc.file_path, loc.line, cmd)
+        delete(cmd)
+    }
+
     res := libc.system(cstr)
-
     when ODIN_OS == .Windows {
         switch {
         case res == -1:
@@ -178,4 +201,5 @@ exec :: proc(command: ^Command, silent := false) -> bool {
             return false
         }
     }
+    return true
 }

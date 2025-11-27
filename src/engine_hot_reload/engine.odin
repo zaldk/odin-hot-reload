@@ -8,7 +8,6 @@ import "core:strings"
 import "core:time"
 import build "../.."
 import os "core:os/os2"
-import win "core:sys/windows"
 
 APP_DLL_PATH :: build.BUILD_DIR + build.DLL_NAME + build.DLL_EXT
 
@@ -33,20 +32,19 @@ AppAPI :: struct {
 }
 
 AppModificationData :: struct {
-    time_table: map[string]time.Time,
-    has_updated: bool,
+    files_mod_time: map[string]time.Time,
+    files_changed: bool,
+    dll_mod_time: time.Time,
 }
 
 init_modification_data :: proc(md: ^AppModificationData) {
-    md.time_table = make(map[string]time.Time)
+    md.files_mod_time = make(map[string]time.Time)
 }
 free_modification_data :: proc(md: ^AppModificationData) {
-    delete(md.time_table)
+    delete(md.files_mod_time)
 }
 gather_modification_data :: proc(md: ^AppModificationData) {
     // {{{
-    md.has_updated = false
-
     w := os.walker_create_path(build.SRC_DIR) // the src/ directory
     defer os.walker_destroy(&w)
 
@@ -64,10 +62,10 @@ gather_modification_data :: proc(md: ^AppModificationData) {
             log.errorf("Failed to get modification time of {}: {}", fi.fullpath, err)
             continue
         }
-        if cached_lmd, ok := md.time_table[fi.fullpath]; !ok || cached_lmd != lmd {
-            md.time_table[fmt.aprint(fi.fullpath)] = lmd
+        if cached_lmd, ok := md.files_mod_time[fi.fullpath]; !ok || cached_lmd != lmd {
+            md.files_mod_time[fmt.aprint(fi.fullpath)] = lmd
             if cached_lmd != {} {
-                md.has_updated = true
+                md.files_changed = true
                 return
             }
         }
@@ -89,7 +87,8 @@ copy_dll :: proc(to: string) -> bool {
     return true
 }
 
-load_app_api :: proc(api_version: int) -> (api: AppAPI, ok: bool) {
+LoadAppApiError :: enum { None = 0, NotFound, NotUpdated, NotCopyable, DLLFuckyWacky }
+load_app_api :: proc(md: ^AppModificationData, api_version: int) -> (api: AppAPI, err: LoadAppApiError) {
     // {{{
     mod_time, mod_time_error := os.modification_time_by_path(APP_DLL_PATH)
     if mod_time_error != nil {
@@ -97,31 +96,29 @@ load_app_api :: proc(api_version: int) -> (api: AppAPI, ok: bool) {
             "Failed getting last write time of {}, error code: {}",
             APP_DLL_PATH, mod_time_error,
         )
-        return
+        return {}, .NotFound
     }
 
-    app_dll_name := get_app_dll_name(api_version)
-    copy_dll(app_dll_name) or_return
+    if md.dll_mod_time == mod_time {
+        return {}, .NotUpdated
+    }
+    md.dll_mod_time = mod_time
 
-    log.debugf("app_dll_name = %q", app_dll_name)
-    // when ODIN_OS == .Windows {
-    //     wide_path := win.utf8_to_wstring(APP_DLL_DIR)
-    //     log.debugf("wide_path = %q", wide_path)
-    //     // defer free(rawptr(wide_path))
-    //     win.SetDllDirectoryW(wide_path)
-    // }
+    app_dll_name := get_app_dll_name(api_version)
+    if !copy_dll(app_dll_name) {
+        return {}, .NotCopyable
+    }
 
     // This proc matches the names of the fields in App_API to sols in the
     // game DLL. It actually looks for symbols starting with `app_`, which is
     // why the argument `"app_"` is there.
-    _, ok = dynlib.initialize_symbols(&api, app_dll_name, "app_", "lib")
+    _, ok := dynlib.initialize_symbols(&api, app_dll_name, "app_", "lib")
     if !ok {
         log.errorf("Failed initializing symbols: {}", dynlib.last_error())
-        return
+        return {}, .DLLFuckyWacky
     }
 
     api.version = api_version
-    ok = true
 
     return
     // }}}
@@ -162,8 +159,8 @@ main :: proc() {
     defer free_modification_data(&md)
 
     app_api_version := 0
-    app_api, app_api_ok := load_app_api(app_api_version)
-    if !app_api_ok {
+    app_api, app_api_err := load_app_api(&md, app_api_version)
+    if app_api_err != {} && app_api_err != .NotUpdated {
         log.errorf("Failed to load App API")
         return
     }
@@ -173,6 +170,7 @@ main :: proc() {
     app_api.init()
 
     old_app_apis := make([dynamic]AppAPI)
+    compiling_dll := false
 
     for app_api.should_run() {
         defer free_all(context.temp_allocator)
@@ -181,20 +179,25 @@ main :: proc() {
         force_reload := app_api.force_reload()
         force_restart := app_api.force_restart()
 
+        // 1) if files were modified, start dll recompilation
+        // 2) if the APP_DLL was modified, load it
+
         gather_modification_data(&md)
-        if !(force_reload || force_restart || md.has_updated) {
+        if !compiling_dll && (force_reload || force_restart || md.files_changed) {
+            build.compile_dll() // asynchronous => dll may not be updated right after this call
+            compiling_dll = true
+            md.files_changed = false
+        }
+
+        new_app_api, new_app_api_err := load_app_api(&md, app_api_version)
+        if new_app_api_err != {} {
+            if new_app_api_err != .NotUpdated {
+                log.error("Could not load new app api")
+            }
             continue
         }
-        md.has_updated = false
-
-        build.compile_dll(#file, #line)
-        new_app_api, new_app_api_ok := load_app_api(app_api_version)
-
-        if !new_app_api_ok {
-            log.error("Could not load new app api")
-            continue
-        }
-        force_restart = force_restart || app_api.memory_size() != new_app_api.memory_size()
+        compiling_dll = false
+        force_restart ||= app_api.memory_size() != new_app_api.memory_size()
 
         if force_restart {
             // This does a full reset. That's basically like opening and
@@ -226,7 +229,6 @@ main :: proc() {
             app_api = new_app_api
             app_api.hot_reloaded(app_memory)
         }
-
         app_api_version += 1
     }
 

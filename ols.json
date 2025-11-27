@@ -1,6 +1,6 @@
 {
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "profiles": [{ "name": "default", "checker_path": ["src"] }],
+    "profiles": [{ "name": "default", "checker_path": ["src", "src/engine_hot_reload/", "src/engine_release/"] }],
     "profile": "default",
     "checker_args": ["-vet", "-warnings-as-errors"],
     "enable_format": false,
